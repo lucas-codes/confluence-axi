@@ -1,0 +1,33 @@
+{
+  "name": "confluence-axi",
+  "version": "0.1.0",
+  "description": "Owned, exact-origin read-only Confluence CLI",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "confluence-axi": "bin/confluence-axi"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "skills/confluence-axi",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "volta": {
+    "node": "24.21.0"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --target=node --outdir=dist && chmod +x bin/confluence-axi",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/__tests__/*.test.ts\"",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.0"
+  }
+}
