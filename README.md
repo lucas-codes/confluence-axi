@@ -2,6 +2,10 @@
 
 Owned, local-only, read-only Confluence CLI. Fixed origin: `https://einc.atlassian.net` (HTTPS, port 443). Native fetch, no Atlassian SDK. Compact responses use the official `@toon-format/toon` encoder, pinned to `4.1.1` (TOON specification 4.1), bundled into the build. This is **not** the public registry package with the same name.
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ## Local development
 
 Use Volta-pinned Node `24.21.0` and Bun. Source tests require Node `>=22.18.0`; the compiled launcher supports Node `>=22`.

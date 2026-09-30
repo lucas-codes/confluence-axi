@@ -2,7 +2,7 @@
 
 ## Result
 
-Official TOON encoding and local validation are ready. Public publication is **not yet cleared**: earlier commits contain personal checkout paths and an internal documentation-wrapper identifier. The current README and skill remove them, but no history was rewritten. License intent also needs confirmation: `package.json:5` declares MIT; README does not promise a license and there is no LICENSE, so none was invented.
+Official TOON encoding and local validation are ready. The owner has decided to publish the existing history as-is, without rewriting or squashing, accepting the historical personal checkout paths and internal documentation-wrapper identifier described below. The current README and skill remove them. The owner confirmed MIT licensing and later public publication; root `LICENSE` contains the standard MIT text with `Copyright (c) 2026 Lucas Lim`, README links to it, and `package.json` retains `"license": "MIT"` and `"private": true`. No remote or publication is part of this change.
 
 ## Design and engineering plan
 
@@ -57,13 +57,13 @@ Reviewed every ranked finding and the accompanying inventory/dependency/publicat
 | 1. Arbitrary site / auth validation gap | No. Fixed origin, HTTPS/443, no userinfo/fragments, exact allowlisted paths validated before auth fetch (`src/api.ts:2–9,20–27`); no host flags (`src/args.ts:4–16`). Status shares that transport (`src/model.ts:33,37`). |
 | 1. Redirect / pagination boundary | No. Explicit manual redirect and all 3xx refused (`src/api.ts:26–27`). Next URLs must pass the same validator and retain collection path; bounded opaque cursor, no auto-fetch (`src/api.ts:43–69`, `src/security.ts:26–28`). |
 | 2. Writes / OAuth scopes / confirmation | No mutation surface. Read command allowlist (`src/args.ts:2–8`), one GET-only transport (`src/api.ts:26`), projection-only model (`src/model.ts:31–68`). No OAuth implementation or token scope request. Server-side read-only permission is still recommended; a broad principal is not made read-only by token format. |
-| 3. Mutable registry install / updater / install scripts with credentials | Removed personal installation paths; guidance uses built local symlink, never registry CLI or auto-update (`README.md:9–33`, `skills/confluence-axi/SKILL.md:8–19,39`). Exact runtime version/integrity locked (`package.json:33–35`, `package-lock.json:25–30`); install used `npm ci --ignore-scripts` without injected auth. Manifest build/prepublish scripts are explicit developer actions, not consumer installation hooks (`package.json:23–27`). No workflow directory or update/setup command is tracked. |
+| 3. Mutable registry install / updater / install scripts with credentials | Removed personal installation paths; guidance uses built local symlink, never registry CLI or auto-update (`README.md:13–37`, `skills/confluence-axi/SKILL.md:8–19,39`). Exact runtime version/integrity locked (`package.json:33–35`, `package-lock.json:25–30`); install used `npm ci --ignore-scripts` without injected auth. Manifest build/prepublish scripts are explicit developer actions, not consumer installation hooks (`package.json:23–27`). No workflow directory or update/setup command is tracked. |
 | 4. Persisted credentials / child argv / remote secret echo | No persistence/login/keychain/OAuth/child-process runtime (`src/security.ts:30–35`, complete `src/index.ts` and launcher). Reads env each invocation. Raw errors discarded (`src/api.ts:28,36,40`, `src/index.ts:19`); redaction and final credential refusal (`src/security.ts:6–24`, `src/render.ts:12–16,26–35`). Test-only subprocess calls are not CLI runtime. |
 | 5. Inconsistent control stripping / prompt injection / write suggestions | Control stripping and redaction cover all normalized strings (`src/security.ts:16–24`, `src/render.ts:6–24`); cursor must be unchanged by cleaning. No eval/shell/browser/content-driven import; ADF links/cards only same-origin navigation (`src/adf.ts:28–30,53–55`, `src/api.ts:11–17`). Content remains untrusted prose; skill states this explicitly (`skills/confluence-axi/SKILL.md:41`). New suggestions are fixed read-only templates, not remote-derived instructions (`src/help.ts:11–14`). Prompt injection risk inherent in reading documents remains. |
 | Inventory: Jira fallback, OAuth hosts, browser callback, hooks, cache/export/body-file | None exists. Seven allowlisted Confluence paths only (`src/api.ts:3`); model endpoint selection (`src/model.ts:33`); parser rejects unsupported flags/commands (`src/args.ts:15,25`). No runtime filesystem writes or subprocesses in tracked runtime source; launcher only imports the adjacent build and writes bounded fallback output (`bin/confluence-axi:1–15`). |
 | Dependency advisory: old TOON decoder prototype pollution | Not the audited old version: official encoder 4.1.1 is bundled (`src/render.ts:1,27`, manifest/lock). Decoder is only imported by tests (`src/__tests__/cli.test.ts:2,58,86`); build has no decoder. Current runtime+dev npm audit reports zero advisories. |
 | Other eleven upstream advisories / dev lifecycle scripts | Upstream brace-expansion, nanoid, PostCSS, Vitest/mocker and esbuild are not in this npm lock. Our installed graph is TOON 4.1.1, TypeScript 5.9.3, Node types 24.19.0, undici-types 7.24.6 (`package-lock.json`). No installed package has preinstall/install/postinstall/prepare scripts. Bun is a separately supplied build tool, not covered by npm audit. No finding required a further upgrade. |
-| Upstream publication/provenance/license observations | Not applicable as evidence for this owned local repo. No remote created or publication attempted. License intent and history cleanup remain publication decisions below. |
+| Upstream publication/provenance/license observations | Not applicable as evidence for this owned local repo. No remote created or publication attempted. The owner has resolved the license and history publication decisions below. |
 
 ## Release checks and history
 
@@ -71,15 +71,17 @@ README now describes exact encoder version, Node build/test versus runtime requi
 
 History scan before this change: `git rev-list --all --reflog --objects` plus `git cat-file` covered **all 4 commits and 20 distinct file blobs**, including commit messages and author/committer metadata, not merely the working tree or last patch. `git fsck --full --no-reflogs` produced no dangling/unreachable warnings. Pattern searches included home paths, internal orchestration/documentation identifiers, credential assignments, common provider token prefixes, and private-key headers; all credential-like matches were manually reviewed dummy test values or environment variable references. No real credential/token/private key was found. This is a pattern/manual review, not proof that arbitrary secrets cannot exist; no dedicated secret-scanner binary was available. Normal Git author/committer identity remains present.
 
-Confirmed historical publication blockers (values deliberately not reproduced):
+Confirmed historical findings, accepted by the owner for publication as-is (values deliberately not reproduced):
 
 - README blob `64fec9a503cf8456fb9bae037690f40ce262387d`, lines 9/16/28: personal absolute checkout paths; line 127: internal documentation-wrapper name.
 - Skill blob `af7f5aeb5cb591f6061e09940e1dcd19aee42ebc`, lines 8/11/19: personal absolute checkout paths.
-- Changes in this branch remove those strings from current tracked documentation, but the original blobs remain in history. A normal fast-forward cannot remove them. Publishing a fresh sanitized snapshot or rewriting the prior local history requires explicit approval and is not performed here.
-- Fixed organization origin remains intentionally in source/docs under the assigned exact-host security contract; confirm this is acceptable for the eventual public repository. Do not generalize the authenticated host as an incidental publication fix.
-- Confirm license/rights holder before adding a LICENSE: manifest says MIT, README does not establish intended attribution or licensing text.
+- Changes in this branch remove those strings from current tracked documentation, but the original blobs remain in history. The owner explicitly chose to publish the existing history as-is: no rewriting, squashing, or fresh sanitized snapshot.
+- Fixed organization origin remains intentionally in source/docs under the assigned exact-host security contract and the owner's decision to make this repository public later. No authenticated-host generalization was made.
+- License decision resolved: MIT, copyright 2026 Lucas Lim. Root `LICENSE` and README's License section now document it; manifest remains MIT and private.
 
 ## Validation evidence
+
+After adding the owner-approved license and recording the history decision, `npm run typecheck`, `npm test` and `npm run build` were rerun: all exited 0, with 20 tests passed, 0 failed, and the same 43.17 KB bundle. `git diff --check` also passed.
 
 On Node `v24.21.0`, Bun `1.4.0`:
 
