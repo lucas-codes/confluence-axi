@@ -3,12 +3,13 @@ export const ORIGIN = 'https://einc.atlassian.net';
 const PATH = /^\/wiki\/(?:rest\/api\/(?:search|user\/current)|api\/v2\/(?:spaces|pages\/[1-9]\d*(?:\/(?:direct-children|attachments|labels))?))$/;
 export function validateUrl(input: string): URL {
   let url: URL;
+  if (input !== input.trim() || /[\x00-\x20\x7f-\x9f]/.test(input) || /^(?:[a-z][a-z\d+.-]*:)?\/\/[^/]*@/i.test(input)) throw new Failure('security','Invalid request URL');
   try { url = new URL(input, ORIGIN); } catch { throw new Failure('security','Invalid request URL'); }
-  if (url.origin !== ORIGIN || url.protocol!=='https:' || url.port && url.port!=='443' || url.username || url.password || url.hash || !PATH.test(url.pathname)) throw new Failure('security','Disallowed request URL');
+  if (url.origin !== ORIGIN || url.protocol!=='https:' || url.port && url.port!=='443' || url.username || url.password || url.href.includes('#') || !PATH.test(url.pathname)) throw new Failure('security','Disallowed request URL');
   return url;
 }
 export function navigation(input: string | null): string | null {
-  if (!input) return null;
+  if (!input || input !== input.trim() || /[\x00-\x20\x7f-\x9f]/.test(input) || /^(?:[a-z][a-z\d+.-]*:)?\/\/[^/]*@/i.test(input)) return null;
   try {
     const url = new URL(input.startsWith('/rest/') || input.startsWith('/spaces/') ? '/wiki'+input : input, ORIGIN);
     if(url.origin!==ORIGIN || url.username || url.password || url.protocol!=='https:') return null;

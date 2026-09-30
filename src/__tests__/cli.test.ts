@@ -45,7 +45,7 @@ test('strict parser rejects misuse before fetch, including diagnostic invocation
 
 test('origin, protocol, port, userinfo and path are rejected with zero fetch calls', async () => {
   let calls=0;
-  for(const url of ['https://evil.test/wiki/api/v2/spaces','http://einc.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}:444/wiki/api/v2/spaces`,'https://x@einc.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}/wiki/download/file`,`${ORIGIN}/wiki/api/v2/pages/123/labels#bad`]) {
+  for(const url of ['https://evil.test/wiki/api/v2/spaces','http://einc.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}:444/wiki/api/v2/spaces`,'https://x@einc.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}/wiki/download/file`,`${ORIGIN}/wiki/api/v2/pages/123/labels#bad`,`${ORIGIN}/wiki/api/v2/spaces#`,'https://@einc.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}/wiki/api/v2/spa\nces`]) {
     await assert.rejects(request(url, basic, async () => { calls++; return new Response('{}'); }), { code: 'security' });
   }
   assert.equal(calls,0);
@@ -125,6 +125,15 @@ test('deadline spans fetch and body, with no retries', async (t) => {
     t.mock.timers.tick(30000);
     assert.equal(await pending,1); assert.equal(calls,1); assert.equal(JSON.parse(output).code,'transport_error');
   }
+});
+
+test('serialized leak check fails closed, even for secrets in structural keys', async () => {
+  let output='';
+  const exit=await main(['unknown','--json'],{env:{...env,ATLASSIAN_API_TOKEN:'error'},fetch:async()=>{throw Error('must not fetch');},write:s=>{output+=s;}});
+  assert.equal(exit,2); assert.ok(!output.includes('error'));
+  const e={...env,ATLASSIAN_API_TOKEN:'\\n'}; output='';
+  const result=await main(['page','123','--json'],{env:e,fetch:async()=>Response.json({...page,body:{atlas_doc_format:{value:doc([{type:'text',text:'line\nnext'}])}}}),write:s=>{output+=s;}});
+  assert.equal(result,1); assert.equal(JSON.parse(output).code,'security'); assert.ok(!output.includes(e.ATLASSIAN_API_TOKEN));
 });
 
 test('validated header/body next links, empty collections and null optional fields', async () => {
