@@ -1,0 +1,249 @@
+import { test } from 'node:test';
+import { decode } from '@toon-format/toon';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import { main } from '../index.ts';
+import { request, resolveOrigin } from '../api.ts';
+import { spawnSync } from 'node:child_process';
+
+const ORIGIN = 'https://example.atlassian.net';
+const env = { ATLASSIAN_EMAIL: 'reader@example.com', ATLASSIAN_API_TOKEN: 'DUMMY_SECRET', ATLASSIAN_SITE: 'example.atlassian.net' };
+const basic = Buffer.from(`${env.ATLASSIAN_EMAIL}:${env.ATLASSIAN_API_TOKEN}`).toString('base64');
+const doc = (content: unknown[] = []) => JSON.stringify({ type: 'doc', version: 1, content });
+const page = { id: '123', title: 'A page', version: { number: 2, createdAt: 'today' }, body: { atlas_doc_format: { value: doc([{ type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] }]) } } };
+async function run(args: string[], data: unknown = {}, status = 200, headers: Record<string,string> = {}, runtimeEnv: Record<string,string> = env) {
+  const calls: { url: string; init: RequestInit | undefined }[] = []; let output = '';
+  const exit = await main(args, { env: runtimeEnv, fetch: async (url, init) => { calls.push({ url: String(url), init }); return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } }); }, write: s => { output += s; } });
+  return { exit, output, calls, value: args.includes('--json') && output.startsWith('{') ? JSON.parse(output) : undefined };
+}
+
+test('every read command uses one authenticated GET and normalized schema', async () => {
+  const cases: [string[],unknown,string,string][] = [
+    [[], {type:'known', accountId:'abc',displayName:'Reader'}, '/wiki/rest/api/user/current', 'auth'],
+    [['status'], {type:'user',accountId:'abc'}, '/wiki/rest/api/user/current', 'auth'],
+    [['search','-q','type=page'], {results:[{content:{id:'123'},entityType:'content',title:'Found'}],totalSize:1}, '/wiki/rest/api/search', 'results'],
+    [['spaces'], {results:[{id:'1',name:'Engineering'}]}, '/wiki/api/v2/spaces', 'spaces'],
+    [['page','123'], page, '/wiki/api/v2/pages/123', 'body'],
+    [['children','123'], {results:[{id:'2',type:'page',childPosition:0},{id:'3',type:'folder'}]}, '/wiki/api/v2/pages/123/direct-children', 'children'],
+    [['attachments','123'], {results:[{id:'att1',title:'File',fileSize:5,version:{number:1},downloadLink:'https://evil.test/file'}]}, '/wiki/api/v2/pages/123/attachments', 'attachments'],
+    [['labels','123'], {results:[{id:'1',name:'tag',prefix:'global'}]}, '/wiki/api/v2/pages/123/labels', 'labels'],
+  ];
+  for (const [args,data,path,field] of cases) {
+    const r = await run([...args,'--json'],data); assert.equal(r.exit,0,r.output); assert.ok(field in r.value);
+    assert.equal(r.calls.length,1); assert.equal(new URL(r.calls[0]!.url).pathname,path);
+    assert.equal(r.calls[0]!.init?.method,'GET'); assert.equal(r.calls[0]!.init?.redirect,'manual');
+    assert.equal((r.calls[0]!.init?.headers as Record<string,string>).Authorization,`Basic ${basic}`);
+    assert.ok(!r.output.includes('downloadLink')); assert.ok(!r.output.includes('evil.test'));
+    if(field==='body') assert.equal(new URL(r.calls[0]!.url).searchParams.get('body-format'),'atlas_doc_format');
+    if(field==='children') assert.equal(r.value.count,1);
+  }
+});
+
+test('strict TOON decoding matches normalized JSON for every data command and errors', async () => {
+  const cases: [string[],unknown][] = [
+    [[],{type:'known',accountId:'007',displayName:''}],
+    [['status'],{type:'known',accountId:'abc',displayName:'null'}],
+    [['search','-q','type=page'],{results:[{content:{id:'123'},title:'true',excerpt:'a,b: c',entityType:'content'}],totalSize:1}],
+    [['spaces'],{results:[{id:'1',name:'-'}]}],
+    [['page','123'],{...page,body:{atlas_doc_format:{value:doc([{type:'text',text:'first\n  next\t"quoted" \\ path'}])}}}],
+    [['children','123'],{results:[{id:'2',type:'page',title:'x'.repeat(91)}]}],
+    [['attachments','123'],{results:[{id:'a',fileSize:0}]}],
+    [['labels','123'],{results:[{id:'1',name:'tag'},{id:'2',name:''}]}],
+    ...['search','spaces','children','attachments','labels'].map(command => [command==='search' ? [command,'-q','none'] : command==='spaces' ? [command] : [command,'123'],{results:[]}] as [string[],unknown]),
+    [['page','123','--max-chars','3'],{...page,title:'x'.repeat(91)}],
+    [['unknown'],{}],
+  ];
+  for(const [args,data] of cases) {
+    const compact=await run(args,data), json=await run([...args,'--json'],data);
+    assert.equal(compact.exit,json.exit);
+    assert.deepEqual(decode(compact.output,{strict:true}),json.value,JSON.stringify(args));
+  }
+});
+
+test('responses disclose empty states and bounded read-only next steps', async () => {
+  const home=await run(['--json'],{type:'known',accountId:'a'});
+  assert.deepEqual(home.value.help,['confluence-axi spaces','confluence-axi search -q <CQL>']);
+  for(const command of ['search','spaces','children','attachments','labels']) {
+    const args=command==='search' ? [command,'-q','none'] : command==='spaces' ? [command] : [command,'123'];
+    const empty=await run([...args,'--json'],{results:[]});
+    assert.equal(empty.value.message,'0 results on this source page');
+    assert.equal(empty.value.count,0); assert.equal(empty.value.hasMore,false);
+    assert.ok(empty.value.help.every((s: unknown)=>typeof s==='string'));
+  }
+  const short=await run(['page','123','--max-chars','3','--json'],page);
+  assert.ok(short.value.help.includes('confluence-axi page <ID> --full'));
+  const longHome=await run(['status','--json'],{type:'known',accountId:'a',displayName:'x'.repeat(91)});
+  assert.ok(!longHome.value.help.some((s: string)=>s.includes('--full')));
+  const failure=await run(['unknown','--json']);
+  assert.deepEqual(failure.value.help,['confluence-axi --help']);
+});
+
+test('locked official-encoder response fixtures', async () => {
+  const fixtures=JSON.parse(readFileSync(new URL('./fixtures/responses.json',import.meta.url),'utf8')) as {args:string[];data:unknown;output:string}[];
+  for(const fixture of fixtures) {
+    const compact=await run(fixture.args,fixture.data);
+    assert.equal(compact.output,fixture.output,JSON.stringify(fixture.args));
+    const json=await run([...fixture.args,'--json'],fixture.data);
+    assert.deepEqual(decode(compact.output,{strict:true}),json.value);
+  }
+});
+
+test('strict parser rejects misuse before fetch, including diagnostic invocations', async () => {
+  for(const args of [ ['unknown','--help'],['page','nope','--help'],['page','123','--limit','2','--help'], ['page','0'],['page','01'],['page','9223372036854775808'],['page','+2'],['page','1.2'],['page','123','extra'],['search','--cql',''],['search'],['spaces','--limit','101'],['spaces','--limit','0'],['spaces','--limit','1.2'],['spaces','--limit'],['spaces','--limit','2','--limit','3'],['status','--full'],['page','123','--full','--max-chars','100'],['--help','--version'],['--json=true'],['status','--site','evil.test'],['--help','-h'],['raw'],['login'],['page','123','--max-chars','20001'] ]) {
+    const r=await run([...args,'--json']); assert.equal(r.exit,2,JSON.stringify(args)); assert.equal(r.calls.length,0); assert.equal(r.value.code,'usage');
+  }
+  for(const args of [['page','--help'],['search','--help'],['--version'],['help','--json']]) { const r=await run(args); assert.equal(r.exit,0); assert.equal(r.calls.length,0); }
+});
+
+test('origin, protocol, port, userinfo and path are rejected with zero fetch calls', async () => {
+  let calls=0;
+  for(const url of ['https://evil.test/wiki/api/v2/spaces','http://example.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}:444/wiki/api/v2/spaces`,'https://x@example.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}/wiki/download/file`,`${ORIGIN}/wiki/api/v2/pages/123/labels#bad`,`${ORIGIN}/wiki/api/v2/spaces#`,'https://@example.atlassian.net/wiki/api/v2/spaces',`${ORIGIN}/wiki/api/v2/spa\nces`]) {
+    await assert.rejects(request(url, basic, async () => { calls++; return new Response('{}'); }, ORIGIN), { code: 'security' });
+  }
+  assert.equal(calls,0);
+});
+
+test('redirect sends credentials only to initial allowed origin, never follows', async () => {
+  for(const status of [301,302,303,307,308]) { const r=await run(['spaces','--json'],{},status,{location:'https://evil.test'}); assert.equal(r.exit,1); assert.equal(r.value.code,'security'); assert.equal(r.calls.length,1); assert.equal(new URL(r.calls[0]!.url).origin,ORIGIN); assert.equal((r.calls[0]!.init?.headers as Record<string,string>).Authorization,`Basic ${basic}`); }
+});
+
+test('crafted next links fail after exactly one allowed-origin call', async () => {
+  for(const next of ['https://evil.test/wiki/api/v2/spaces?cursor=x','http://example.atlassian.net/wiki/api/v2/spaces?cursor=x','/wiki/download/file?cursor=x','/wiki/api/v2/pages/2/labels?cursor=x','/wiki/api/v2/spaces','/wiki/api/v2/spaces?cursor=x#fragment','https://x@example.atlassian.net/wiki/api/v2/spaces?cursor=x']) {
+    const r=await run(['spaces','--json'],{results:[],_links:{next}}); assert.equal(r.exit,1,next); assert.equal(r.calls.length,1); assert.equal(new URL(r.calls[0]!.url).origin,ORIGIN); assert.equal((r.calls[0]!.init?.headers as Record<string,string>).Authorization,`Basic ${basic}`);
+  }
+  const r=await run(['spaces','--json'],{results:[],_links:{next:'/wiki/api/v2/spaces?cursor=a'}},200,{Link:'</wiki/api/v2/spaces?cursor=b>; rel="next"'}); assert.equal(r.value.code,'bad_response');
+});
+
+test('cursor round trip remains opaque, long, bounded and one-page only', async () => {
+  const cursor='abc'.repeat(100); const r=await run(['search','-q','hello','--json'],{results:[],_links:{next:`/rest/api/search?cursor=${cursor}`}}); assert.equal(r.exit,0); assert.equal(r.value.nextCursor,cursor); assert.equal(r.calls.length,1);
+  const next=await run(['search','-q','hello','--cursor',r.value.nextCursor,'--json'],{results:[]}); assert.equal(new URL(next.calls[0]!.url).searchParams.get('cursor'),cursor);
+  for(const cursor of ['x'.repeat(8193),'unsafe\u009b','DUMMY_SECRET','DUMMY_\x1b[31mSECRET',basic]) {
+    const a=await run(['spaces','--cursor',cursor,'--json'],{results:[]}); assert.equal(a.exit,2); assert.equal(a.calls.length,0);
+    const b=await run(['spaces','--json'],{results:[],_links:{next:`/wiki/api/v2/spaces?cursor=${encodeURIComponent(cursor)}`}}); assert.equal(b.value.code,'bad_response');
+  }
+});
+
+test('sanitization and double redaction protect every string field in JSON and TOON', async () => {
+  const dirty='A\u009b31mB\x1b[31mC\x1b]0;evil\x07D\0\x7f';
+  const secret='DUMMY_\x1b[31mSECRET '+basic;
+  for(const json of [false,true]) {
+    for(const [args,data] of [ [['spaces'],{results:[{name:dirty,key:secret}]}], [['labels','123'],{results:[{name:dirty,prefix:secret}]}], [['attachments','123'],{results:[{title:dirty,mediaType:secret}]}], [['page','123'],{...page,title:dirty,body:{atlas_doc_format:{value:doc([{type:'text',text:dirty+'\n\t'+secret}])}}}], [['status'],{type:'known',accountId:dirty,displayName:secret}] ] as [string[],unknown][]) {
+      const r=await run([...args,...(json?['--json']:[])],data); assert.equal(r.exit,0,r.output); assert.ok(!/[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(r.output));
+      for(const s of [env.ATLASSIAN_API_TOKEN,basic,'evil','31m']) assert.ok(!r.output.includes(s),r.output);
+    }
+    const r=await run(['DUMMY_\x1b[31mSECRET',...(json?['--json']:[])]); assert.equal(r.exit,2); assert.ok(!r.output.includes('DUMMY_SECRET'));
+  }
+});
+
+test('HTTP errors and malformed JSON/shape never echo remote secrets', async () => {
+  for(const [status,code] of [[401,'unauthorized'],[403,'forbidden'],[404,'not_found'],[429,'rate_limited'],[500,'http_error']] as const) { const r=await run(['spaces','--json'],{error:env.ATLASSIAN_API_TOKEN},status); assert.equal(r.value.code,code); assert.equal(r.exit,1); assert.ok(!r.output.includes(env.ATLASSIAN_API_TOKEN)); }
+  for(const data of [null,[],{results:null},{results:[null]},{results:[{id:3}]},{results:[{name:4}]},{results:Array(31).fill({})}]) { const r=await run(['spaces','--json'],data); assert.equal(r.value.code,'bad_response'); }
+  for(const data of [{type:'anonymous',accountId:'a'},{type:'known',accountId:''},{type:'user',accountId:2}]) assert.equal((await run(['status','--json'],data)).exit,1);
+  for(const data of [{...page,id:'124'},{...page,version:{number:2.5}},{...page,body:{atlas_doc_format:{value:'{}'}}},{...page,body:{atlas_doc_format:{value:'null'}}},{...page,body:{atlas_doc_format:{value:'bad DUMMY_SECRET'}}}]) assert.equal((await run(['page','123','--json'],data)).exit,1);
+  assert.equal((await run(['search','-q','a','--json'],{results:[{space:{id:9007199254740992}}]})).value.code,'bad_response');
+});
+
+test('transport, JSON parse, content type and response cap failures are bounded', async () => {
+  for(const [fetch,code] of [ [async()=>{throw new Error(env.ATLASSIAN_API_TOKEN+basic);},'transport_error'], [async()=>new Response('bad DUMMY_SECRET',{headers:{'content-type':'application/json'}}),'bad_json'], [async()=>new Response('{}'),'bad_json'], [async()=>new Response('x'.repeat(5*1024*1024+1),{headers:{'content-type':'application/json'}}),'response_too_large'] ] as [typeof globalThis.fetch,string][]) {
+    let output=''; const exit=await main(['spaces','--json'],{env,fetch,write:s=>{output+=s;}}); assert.equal(exit,1); assert.equal(JSON.parse(output).code,code); assert.ok(!output.includes(env.ATLASSIAN_API_TOKEN)); assert.ok(!output.includes(basic));
+  }
+});
+
+test('missing/invalid credentials fail before fetch and name every variable', async () => {
+  for(const e of [{}, {ATLASSIAN_EMAIL:env.ATLASSIAN_EMAIL}, {...env,ATLASSIAN_API_TOKEN:''}, {...env,ATLASSIAN_EMAIL:'bad:email'}, {...env,ATLASSIAN_API_TOKEN:'bad\n'}]) {
+    let calls=0,out=''; const exit=await main(['status','--json'],{env:e,fetch:async()=>{calls++;throw Error();},write:s=>{out+=s;}}); assert.equal(exit,1); assert.equal(calls,0); assert.match(out,/token_missing|security/);
+  }
+  let out=''; await main(['status','--json'],{env:{},fetch:async()=>{throw Error();},write:s=>{out+=s;}});
+  const failure=JSON.parse(out); assert.equal(failure.code,'token_missing');
+  for(const name of ['ATLASSIAN_EMAIL','ATLASSIAN_API_TOKEN','ATLASSIAN_SITE']) assert.ok(failure.error.includes(name),name);
+  assert.match(failure.help[0],/README/);
+});
+
+test('ATLASSIAN_SITE is required, normalized to the allowed origin and sent to that origin only', async () => {
+  const { ATLASSIAN_SITE: _site, ...noSite } = env;
+  let calls=0,out=''; const exit=await main(['status','--json'],{env:noSite,fetch:async()=>{calls++;throw Error();},write:s=>{out+=s;}});
+  assert.equal(exit,1); assert.equal(calls,0); assert.equal(JSON.parse(out).code,'token_missing'); assert.match(JSON.parse(out).error,/ATLASSIAN_SITE/);
+  for(const site of ['example.atlassian.net','https://example.atlassian.net','https://example.atlassian.net/','Example.Atlassian.NET']) {
+    const r=await run(['status','--json'],{type:'known',accountId:'a'},200,{},{...env,ATLASSIAN_SITE:site});
+    assert.equal(r.exit,0,site); assert.equal(r.value.origin,ORIGIN); assert.equal(new URL(r.calls[0]!.url).origin,ORIGIN);
+  }
+  for(const site of ['evil.test','acme.example.com','example.atlassian.net.evil.test','sub.example.atlassian.net','http://example.atlassian.net','https://example.atlassian.net/wiki','https://example.atlassian.net//','example.atlassian.net:444','https://example.atlassian.net:443','https://user@example.atlassian.net','https://example.atlassian.net?x=1','https://example.atlassian.net#x',' example.atlassian.net','.atlassian.net','-a.atlassian.net','ftp://example.atlassian.net']) {
+    const r=await run(['status','--json'],{type:'known',accountId:'a'},200,{},{...env,ATLASSIAN_SITE:site});
+    assert.equal(r.exit,2,site); assert.equal(r.value.code,'usage',site); assert.equal(r.calls.length,0,site);
+    assert.throws(()=>resolveOrigin({ATLASSIAN_SITE:site}),{code:'usage'},site);
+  }
+});
+
+test('help and version need no environment', async () => {
+  for(const args of [['--help'],['help'],['--version']]) { let out=''; const exit=await main(args,{env:{},fetch:async()=>{throw Error();},write:s=>{out+=s;}}); assert.equal(exit,0); assert.ok(out.length>0); }
+});
+
+test('Unicode limits, truncation disclosure and hard stdout cap apply to both formats', async () => {
+  for(const json of [false,true]) {
+    const r=await run(['page','123','--max-chars','3',...(json?['--json']:[])],{...page,title:'x'.repeat(91),body:{atlas_doc_format:{value:doc([{type:'text',text:'😀'.repeat(10)}])}}}); assert.equal(r.exit,0); assert.match(r.output,/bodyTruncated/); if(json){assert.equal(r.value.body,'😀😀😀');assert.equal(r.value.bodyLength,10);assert.equal(r.value.truncatedFields.title,91);}
+    const large=await run(['search','-q','a','--full','--limit','100',...(json?['--json']:[])],{results:Array.from({length:100},()=>({title:'x'.repeat(1000),excerpt:'x'.repeat(1000),url:ORIGIN+'/'+ 'x'.repeat(1000),lastModified:'x'.repeat(1000),entityType:'x'.repeat(1000),content:{id:'x'.repeat(1000)}}))}); assert.equal(large.exit,1); assert.match(large.output,/output_too_large/); assert.ok(Buffer.byteLength(large.output)<512*1024);
+  }
+});
+
+test('deadline spans fetch and body, with no retries', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const bodyHangs of [false, true]) {
+    let output='',calls=0;
+    const fetcher: typeof fetch = async () => {
+      calls++;
+      if (!bodyHangs) return await new Promise<Response>(() => {});
+      return new Response(new ReadableStream({ start() {} }), { headers: { 'content-type': 'application/json' } });
+    };
+    const pending=main(['spaces','--json'],{env,fetch:fetcher,write:s=>{output+=s;}});
+    await Promise.resolve();
+    t.mock.timers.tick(30000);
+    assert.equal(await pending,1); assert.equal(calls,1); assert.equal(JSON.parse(output).code,'transport_error');
+  }
+});
+
+test('serialized leak check fails closed, even for secrets in structural keys', async () => {
+  let output='';
+  const exit=await main(['unknown','--json'],{env:{...env,ATLASSIAN_API_TOKEN:'error'},fetch:async()=>{throw Error('must not fetch');},write:s=>{output+=s;}});
+  assert.equal(exit,2); assert.ok(!output.includes('error'));
+  const e={...env,ATLASSIAN_API_TOKEN:'\\n'}; output='';
+  const result=await main(['page','123','--json'],{env:e,fetch:async()=>Response.json({...page,body:{atlas_doc_format:{value:doc([{type:'text',text:'line\nnext'}])}}}),write:s=>{output+=s;}});
+  assert.equal(result,1); assert.equal(JSON.parse(output).code,'security'); assert.ok(!output.includes(e.ATLASSIAN_API_TOKEN));
+});
+
+test('validated header/body next links, empty collections and null optional fields', async () => {
+  for(const command of ['spaces','children','attachments','labels']) {
+    const path=command==='spaces' ? '/wiki/api/v2/spaces' : `/wiki/api/v2/pages/123/${command==='children' ? 'direct-children' : command}`;
+    const args=command==='spaces' ? [command,'--json'] : [command,'123','--json'];
+    const r=await run(args,{results:[],_links:{next:`${path}?cursor=abc&limit=30`}},200,{link:`<${ORIGIN}${path}?limit=30&cursor=abc>; rel="next"`});
+    assert.equal(r.exit,0,r.output); assert.equal(r.value.nextCursor,'abc'); assert.equal(r.value.count,0); assert.equal(r.calls.length,1);
+  }
+  const r=await run(['spaces','--json'],{results:[{}]}); assert.deepEqual(r.value.spaces,[{id:null,key:null,name:null,type:null,status:null,homepageId:null}]);
+  for(const next of ['not a URL','/wiki/api/v2/spaces?cursor=x&cursor=y','/wiki/api/v2/spaces?cursor=']) assert.equal((await run(['spaces','--json'],{results:[],_links:{next}})).exit,1);
+  assert.equal((await run(['spaces','--json'],{results:[]},200,{link:'broken; rel="next"'})).value.code,'bad_response');
+});
+
+test('launcher help and loader failures are stdout only and secret safe', () => {
+  const launcher=new URL('../../bin/confluence-axi',import.meta.url);
+  const rejected=spawnSync(process.execPath,['--import',new URL('./reject-build.ts',import.meta.url).href,launcher.pathname,'--json'],{env,encoding:'utf8'});
+  assert.equal(rejected.status,1); assert.equal(rejected.stderr,''); assert.equal(JSON.parse(rejected.stdout).code,'transport_error'); assert.ok(!rejected.stdout.includes(env.ATLASSIAN_API_TOKEN));
+});
+
+test('hard text and ADF node-count bounds and unsafe numeric metadata', async () => {
+  const long='😀'.repeat(20001);
+  const data={...page,title:'x'.repeat(1001),body:{atlas_doc_format:{value:doc([{type:'text',text:long}])}}};
+  for(const [flags,max,titleMax] of [[[],2000,90],[['--full'],20000,1000]] as [string[],number,number][]) {
+    const r=await run(['page','123',...flags,'--json'],data); assert.equal(r.exit,0); assert.equal(Array.from(r.value.body).length,max); assert.equal(r.value.bodyLength,20001); assert.equal(r.value.title.length,titleMax);
+  }
+  const many={...page,body:{atlas_doc_format:{value:doc(Array(100000).fill({type:'hardBreak'}))}}};
+  assert.equal((await run(['page','123','--json'],many)).value.code,'bad_response');
+  for(const [args,data] of [ [['attachments','123'],{results:[{fileSize:9007199254740992}]}], [['labels','123'],{results:[{name:3}]}], [['children','123'],{results:[{type:'folder',childPosition:1.2}]}], [['search','-q','a'],{results:[],totalSize:1.1}], [['spaces','--limit','1'],{results:[{},{}]}] ] as [string[],unknown][]) assert.equal((await run([...args,'--json'],data)).value.code,'bad_response');
+  const space=await run(['search','-q','a','--json'],{results:[{space:{id:42}}]}); assert.equal(space.value.results[0].id,'42');
+});
+
+test('ADF links/cards never expose foreign, userinfo or non-HTTPS targets; unsupported leaves visible', async () => {
+  const nodes: unknown[]=[];
+  for(const url of ['https://evil.test','http://example.atlassian.net/a','https://x@example.atlassian.net/a',ORIGIN+'/wiki/a']) { nodes.push({type:'paragraph',content:[{type:'text',text:'Anchor',marks:[{type:'link',attrs:{href:url}}]}]},{type:'inlineCard',attrs:{url}}); }
+  nodes.push({type:'extension'},{type:'media',attrs:{alt:'File'}});
+  const r=await run(['page','123','--json'],{...page,body:{atlas_doc_format:{value:doc(nodes)}}}); assert.equal(r.exit,0); assert.ok(!r.value.body.includes('evil.test')); assert.match(r.value.body,/omitted/); assert.match(r.value.body,/unsupported/); assert.match(r.value.body,/attachment/); assert.match(r.value.body,/https:\/\/example.atlassian.net\/wiki\/a/);
+  let nested: unknown={type:'text',text:'a'}; for(let i=0;i<66;i++) nested={type:'paragraph',content:[nested]}; assert.equal((await run(['page','123','--json'],{...page,body:{atlas_doc_format:{value:doc([nested])}}})).exit,1);
+});
