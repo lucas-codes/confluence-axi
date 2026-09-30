@@ -52,12 +52,12 @@ test('origin, protocol, port, userinfo and path are rejected with zero fetch cal
 });
 
 test('redirect sends credentials only to initial allowed origin, never follows', async () => {
-  for(const status of [301,302,303,307,308]) { const r=await run(['spaces','--json'],{},status,{location:'https://evil.test'}); assert.equal(r.exit,1); assert.equal(r.value.code,'security'); assert.equal(r.calls.length,1); }
+  for(const status of [301,302,303,307,308]) { const r=await run(['spaces','--json'],{},status,{location:'https://evil.test'}); assert.equal(r.exit,1); assert.equal(r.value.code,'security'); assert.equal(r.calls.length,1); assert.equal(new URL(r.calls[0]!.url).origin,ORIGIN); assert.equal((r.calls[0]!.init?.headers as Record<string,string>).Authorization,`Basic ${basic}`); }
 });
 
 test('crafted next links fail after exactly one allowed-origin call', async () => {
   for(const next of ['https://evil.test/wiki/api/v2/spaces?cursor=x','http://einc.atlassian.net/wiki/api/v2/spaces?cursor=x','/wiki/download/file?cursor=x','/wiki/api/v2/pages/2/labels?cursor=x','/wiki/api/v2/spaces','/wiki/api/v2/spaces?cursor=x#fragment','https://x@einc.atlassian.net/wiki/api/v2/spaces?cursor=x']) {
-    const r=await run(['spaces','--json'],{results:[],_links:{next}}); assert.equal(r.exit,1,next); assert.equal(r.calls.length,1);
+    const r=await run(['spaces','--json'],{results:[],_links:{next}}); assert.equal(r.exit,1,next); assert.equal(r.calls.length,1); assert.equal(new URL(r.calls[0]!.url).origin,ORIGIN); assert.equal((r.calls[0]!.init?.headers as Record<string,string>).Authorization,`Basic ${basic}`);
   }
   const r=await run(['spaces','--json'],{results:[],_links:{next:'/wiki/api/v2/spaces?cursor=a'}},200,{Link:'</wiki/api/v2/spaces?cursor=b>; rel="next"'}); assert.equal(r.value.code,'bad_response');
 });
@@ -152,6 +152,18 @@ test('launcher help and loader failures are stdout only and secret safe', () => 
   const launcher=new URL('../../bin/confluence-axi',import.meta.url);
   const rejected=spawnSync(process.execPath,['--import',new URL('./reject-build.ts',import.meta.url).href,launcher.pathname,'--json'],{env,encoding:'utf8'});
   assert.equal(rejected.status,1); assert.equal(rejected.stderr,''); assert.equal(JSON.parse(rejected.stdout).code,'transport_error'); assert.ok(!rejected.stdout.includes(env.ATLASSIAN_API_TOKEN));
+});
+
+test('hard text and ADF node-count bounds and unsafe numeric metadata', async () => {
+  const long='😀'.repeat(20001);
+  const data={...page,title:'x'.repeat(1001),body:{atlas_doc_format:{value:doc([{type:'text',text:long}])}}};
+  for(const [flags,max,titleMax] of [[[],2000,90],[['--full'],20000,1000]] as [string[],number,number][]) {
+    const r=await run(['page','123',...flags,'--json'],data); assert.equal(r.exit,0); assert.equal(Array.from(r.value.body).length,max); assert.equal(r.value.bodyLength,20001); assert.equal(r.value.title.length,titleMax);
+  }
+  const many={...page,body:{atlas_doc_format:{value:doc(Array(100000).fill({type:'hardBreak'}))}}};
+  assert.equal((await run(['page','123','--json'],many)).value.code,'bad_response');
+  for(const [args,data] of [ [['attachments','123'],{results:[{fileSize:9007199254740992}]}], [['labels','123'],{results:[{name:3}]}], [['children','123'],{results:[{type:'folder',childPosition:1.2}]}], [['search','-q','a'],{results:[],totalSize:1.1}], [['spaces','--limit','1'],{results:[{},{}]}] ] as [string[],unknown][]) assert.equal((await run([...args,'--json'],data)).value.code,'bad_response');
+  const space=await run(['search','-q','a','--json'],{results:[{space:{id:42}}]}); assert.equal(space.value.results[0].id,'42');
 });
 
 test('ADF links/cards never expose foreign, userinfo or non-HTTPS targets; unsupported leaves visible', async () => {
