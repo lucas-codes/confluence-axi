@@ -1,0 +1,165 @@
+[
+  {
+    "args": [],
+    "data": {
+      "type": "known",
+      "accountId": "007",
+      "displayName": ""
+    },
+    "output": "origin: \"https://einc.atlassian.net\"\nversion: 0.1.0\nauth: ok\naccountId: \"007\"\ndisplayName: \"\"\nhelp[2]: confluence-axi spaces,confluence-axi search -q <CQL>\n"
+  },
+  {
+    "args": [
+      "status"
+    ],
+    "data": {
+      "type": "known",
+      "accountId": "abc",
+      "displayName": "null"
+    },
+    "output": "origin: \"https://einc.atlassian.net\"\nversion: 0.1.0\nauth: ok\naccountId: abc\ndisplayName: \"null\"\nhelp[2]: confluence-axi spaces,confluence-axi search -q <CQL>\n"
+  },
+  {
+    "args": [
+      "search",
+      "-q",
+      "type=page"
+    ],
+    "data": {
+      "results": [
+        {
+          "content": {
+            "id": "123"
+          },
+          "title": "true",
+          "excerpt": "a,b: c",
+          "entityType": "content"
+        }
+      ],
+      "totalSize": 1
+    },
+    "output": "query: type=page\ntotal: 1\ncount: 1\nhasMore: false\nnextCursor: null\nresults[1]{id,type,title,url,excerpt,updated}:\n  \"123\",content,\"true\",null,\"a,b: c\",null\nhelp[1]: confluence-axi page <ID>\n"
+  },
+  {
+    "args": [
+      "spaces"
+    ],
+    "data": {
+      "results": [
+        {
+          "id": "1",
+          "name": "-"
+        }
+      ]
+    },
+    "output": "count: 1\nhasMore: false\nnextCursor: null\nspaces[1]{id,key,name,type,status,homepageId}:\n  \"1\",null,\"-\",null,null,null\nhelp[1]: confluence-axi page <ID>\n"
+  },
+  {
+    "args": [
+      "page",
+      "123"
+    ],
+    "data": {
+      "id": "123",
+      "title": "Page",
+      "body": {
+        "atlas_doc_format": {
+          "value": "{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"text\",\"text\":\"first\\n  second\\t\\\"quote\\\" \\\\ path\"}]}"
+        }
+      }
+    },
+    "output": "id: \"123\"\ntitle: Page\nstatus: null\nspaceId: null\nparentId: null\nversion: null\ncreated: null\nupdated: null\nurl: null\nbody: \"first\\n  second\\t\\\"quote\\\" \\\\ path\"\nbodyLength: 29\nbodyTruncated: false\nhelp[2]: confluence-axi children <ID>,confluence-axi labels <ID>\n"
+  },
+  {
+    "args": [
+      "children",
+      "123"
+    ],
+    "data": {
+      "results": [
+        {
+          "id": "2",
+          "type": "page",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "id": "3",
+          "type": "page",
+          "title": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      ]
+    },
+    "output": "pageId: \"123\"\ncount: 2\nhasMore: false\nnextCursor: null\nchildren[2]{id,title,status,spaceId,position,truncatedFields{title}}:\n  \"2\",xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,null,null,null,91\n  \"3\",yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy,null,null,null,91\nhelp[2]: confluence-axi page <ID>,confluence-axi children <ID> --full\n"
+  },
+  {
+    "args": [
+      "attachments",
+      "123"
+    ],
+    "data": {
+      "results": [
+        {
+          "id": "a",
+          "fileSize": 0
+        }
+      ]
+    },
+    "output": "pageId: \"123\"\ncount: 1\nhasMore: false\nnextCursor: null\nattachments[1]{id,title,mediaType,fileSize,created,version}:\n  a,null,null,0,null,null\nhelp[1]: confluence-axi page <ID>\n"
+  },
+  {
+    "args": [
+      "labels",
+      "123"
+    ],
+    "data": {
+      "results": [
+        {
+          "id": "1",
+          "name": "tag"
+        },
+        {
+          "id": "2",
+          "name": ""
+        }
+      ]
+    },
+    "output": "pageId: \"123\"\ncount: 2\nhasMore: false\nnextCursor: null\nlabels[2]{id,name,prefix}:\n  \"1\",tag,null\n  \"2\",\"\",null\nhelp[1]: confluence-axi page <ID>\n"
+  },
+  {
+    "args": [
+      "spaces"
+    ],
+    "data": {
+      "results": []
+    },
+    "output": "count: 0\nhasMore: false\nnextCursor: null\nspaces: []\nmessage: 0 results on this source page\nhelp[1]: confluence-axi page <ID>\n"
+  },
+  {
+    "args": [
+      "spaces"
+    ],
+    "data": {
+      "results": [
+        {
+          "id": "1",
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "id": "2",
+          "name": "short"
+        }
+      ],
+      "_links": {
+        "next": "/wiki/api/v2/spaces?cursor=next"
+      }
+    },
+    "output": "count: 2\nhasMore: true\nnextCursor: next\nspaces[2]:\n  - id: \"1\"\n    key: null\n    name: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n    type: null\n    status: null\n    homepageId: null\n    truncatedFields:\n      name: 91\n  - id: \"2\"\n    key: null\n    name: short\n    type: null\n    status: null\n    homepageId: null\nhelp[3]: confluence-axi page <ID>,confluence-axi spaces --cursor <nextCursor>,confluence-axi spaces --full\n"
+  },
+  {
+    "args": [
+      "unknown"
+    ],
+    "data": {},
+    "output": "error: Unknown command\ncode: usage\nhelp[1]: confluence-axi --help\n"
+  }
+]

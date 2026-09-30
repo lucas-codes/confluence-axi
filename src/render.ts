@@ -1,27 +1,8 @@
+import { encode } from '@toon-format/toon';
 import type { Args } from './args.ts';
 import { clean, redact, Failure } from './security.ts';
 
 export const OUTPUT_MAX = 512*1024;
-function scalar(value: unknown): string {
-  if(value==null || value==='') return '-';
-  if(typeof value!=='string') return String(value);
-  if(value!==value.trim() || /[,:[\]{}"\\\n\t]/.test(value) || /^(?:-|true$|false$|null$|\d)/.test(value)) return JSON.stringify(value);
-  return value;
-}
-function toon(o: Record<string,unknown>, indent=''): string {
-  const lines: string[]=[];
-  for(const [key,v] of Object.entries(o)) {
-    if(Array.isArray(v)) {
-      const rows=v as Record<string,unknown>[]; const keys=Object.keys(rows[0] ?? {});
-      const tabular=rows.every(r=>r && typeof r==='object' && Object.keys(r).join()===keys.join() && Object.values(r).every(c=>c===null || typeof c!=='object'));
-      if(tabular) { lines.push(`${indent}${key}[${rows.length}]{${keys.join(',')}}:`); for(const r of rows) lines.push(indent+'  '+keys.map(k=>scalar(r[k])).join(',')); }
-      else { lines.push(`${indent}${key}[${rows.length}]:`); for(const r of rows) { const nested=toon(r,indent+'    ').split('\n'); lines.push(indent+'  - '+nested[0]!.trimStart(),...nested.slice(1)); } }
-    } else if(v!==null && typeof v==='object') { lines.push(indent+key+':',toon(v as Record<string,unknown>,indent+'  ')); }
-    else if(key==='body' && typeof v==='string') { lines.push(indent+'body:'); for(const line of v.split('\n')) lines.push(indent+'  '+line); }
-    else lines.push(indent+key+': '+scalar(v));
-  }
-  return lines.join('\n');
-}
 export function normalize(value: Record<string,unknown>, args: Pick<Args,'full'|'maxChars'>, hidden: string[]): Record<string,unknown> {
   function visit(o: Record<string,unknown>): Record<string,unknown> {
     const result: Record<string,unknown>={}, truncated: Record<string,number>={};
@@ -43,7 +24,7 @@ export function normalize(value: Record<string,unknown>, args: Pick<Args,'full'|
   return visit(value);
 }
 export function serialize(value: Record<string,unknown>, json: boolean, hidden: string[]): string {
-  const output=(json ? JSON.stringify(value,null,2) : toon(value))+'\n';
+  const output=(json ? JSON.stringify(value,null,2) : encode(value))+'\n';
   if(Buffer.byteLength(output)>OUTPUT_MAX) throw new Failure('output_too_large','Serialized output exceeds 512 KiB');
   if(hidden.some(secret=>output.includes(secret))) throw new Failure('security','Credential echo refused');
   return output;

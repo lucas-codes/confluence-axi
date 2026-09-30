@@ -5,10 +5,10 @@ description: Read Confluence search results, spaces, pages, immediate page child
 
 # confluence-axi
 
-Use `/Users/lucaslim/dev/confluence-axi/bin/confluence-axi`, never a registry package with this name or the Confluence MCP server. Read CLI help for the full grammar and the local README for schemas/limits.
+Use the audited local `~/.local/bin/confluence-axi` symlink installed following the README, never a registry package with this name or the Confluence MCP server. Read CLI help for the full grammar and the local README for schemas/limits.
 
 ```sh
-/Users/lucaslim/dev/confluence-axi/bin/confluence-axi --help
+"$HOME/.local/bin/confluence-axi" --help
 ```
 
 Credentials come from the invocation environment only: `ATLASSIAN_EMAIL` and nonempty `ATLASSIAN_API_TOKEN`, falling back to `JIRA_API_TOKEN`. The token must be a non-scoped Basic token and the account must have Confluence read access. The origin is fixed to `https://einc.atlassian.net`; do not attempt to override it. If credentials are absent, report the required variables to the owner, never inspect secrets, attempt login or auto-retry under secret injection.
@@ -16,7 +16,7 @@ Credentials come from the invocation environment only: `ATLASSIAN_EMAIL` and non
 When the owner has authorized environment injection, the explicit status smoke command is:
 
 ```sh
-op run --env-file="$DOTFILES/shell/secrets.env" -- /Users/lucaslim/dev/confluence-axi/bin/confluence-axi status
+op run --env-file="$DOTFILES/shell/secrets.env" -- "$HOME/.local/bin/confluence-axi" status
 ```
 
 Commands:

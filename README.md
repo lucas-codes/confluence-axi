@@ -1,22 +1,33 @@
 # confluence-axi
 
-Owned, local-only, read-only Confluence CLI. Fixed origin: `https://einc.atlassian.net` (HTTPS, port 443). Native fetch, no SDK or runtime dependencies. This is **not** the public registry package with the same name.
+Owned, local-only, read-only Confluence CLI. Fixed origin: `https://einc.atlassian.net` (HTTPS, port 443). Native fetch, no Atlassian SDK. Compact responses use the official `@toon-format/toon` encoder, pinned to `4.1.1` (TOON specification 4.1), bundled into the build. This is **not** the public registry package with the same name.
 
 ## Local development
 
 Use Volta-pinned Node `24.21.0` and Bun. Source tests require Node `>=22.18.0`; the compiled launcher supports Node `>=22`.
 
-Run in `/Users/lucaslim/dev/confluence-axi`, without injected credentials:
+From your local checkout, without injected credentials:
 
 ```sh
 npm ci --ignore-scripts
 npm run typecheck
 npm test
 npm run build
-/Users/lucaslim/dev/confluence-axi/bin/confluence-axi --help
+./bin/confluence-axi --help
 ```
 
-No registry installation, lifecycle installation hooks, credential files, disk caches or runtime temp files. Build artifacts are local and ignored by Git. Rebuild after changing source; the launcher never installs or updates itself.
+For local installation, create a symlink to the built checkout (keep that checkout in place):
+
+```sh
+mkdir -p "$HOME/.local/bin"
+ln -s "$PWD/bin/confluence-axi" "$HOME/.local/bin/confluence-axi"
+# Ensure ~/.local/bin is on PATH.
+confluence-axi --help
+```
+
+If a target already exists, inspect it rather than overwrite it. The launcher resolves its symlink to load the adjacent `dist/index.js`; runtime needs Node `>=22`, but no `node_modules` or Bun. Dependency installation and source tests require Node `>=22.18.0`; Bun is required only to build.
+
+No registry CLI installation, lifecycle installation hooks, credential files, disk caches or runtime temp files. Build artifacts are local and ignored by Git. Rebuild after changing source; the launcher never installs or updates itself.
 
 ## Credentials and owner smoke test
 
@@ -25,7 +36,7 @@ Supply `ATLASSIAN_EMAIL` and a **non-scoped** Basic API token through `ATLASSIAN
 After ensuring the env file supplies the email and a compatible token, the owner can run this exact live smoke test:
 
 ```sh
-op run --env-file="$DOTFILES/shell/secrets.env" -- /Users/lucaslim/dev/confluence-axi/bin/confluence-axi status
+op run --env-file="$DOTFILES/shell/secrets.env" -- "$HOME/.local/bin/confluence-axi" status
 ```
 
 Development tests use dummy credentials and mocked fetch only. No live service/real credential smoke test was performed.
@@ -70,7 +81,7 @@ Both body `_links.next` and header `Link` next links must normalize to the same 
 
 ## Normalized output
 
-Compact output follows the local Jira CLI's header/table shape: `key: value`, `rows[N]{columns}:` and indented rows. Null/unavailable fields use `-`; JSON uses `null`. JSON is **normalized**, not a raw remote dump. Objects with nested truncation metadata use indented object-list rows rather than flat table cells.
+Compact output is official TOON: `key: value`, `rows[N]{columns}:` and indented rows, with the encoder's default two-space indentation and comma delimiter. Null/unavailable fields use `null` in both formats; empty strings use `""` in TOON. Bodies are quoted strings with escaped newlines/tabs, not literal indented blocks. Uniform nested objects can fold into tabular headers; nonuniform rows use object lists. Empty arrays use `[]`. The CLI appends one framing newline after the encoder's document. JSON is **normalized**, not a raw remote dump, and strictly decoding TOON yields the same data.
 
 | Command | Fields |
 |---|---|
@@ -81,6 +92,8 @@ Compact output follows the local Jira CLI's header/table shape: `key: value`, `r
 | children | `pageId,count,hasMore,nextCursor,children[{id,title,status,spaceId,position}]` |
 | attachments | `pageId,count,hasMore,nextCursor,attachments[{id,title,mediaType,fileSize,created,version}]` |
 | labels | `pageId,count,hasMore,nextCursor,labels[{id,name,prefix}]` |
+
+Every successful data response includes read-only next-step `help[]` command templates; placeholders such as `<ID>`, `<CQL>` and `<nextCursor>` must be replaced by the caller. Zero emitted rows include `message: 0 results on this source page` (even if `hasMore` is true). Shortened content suggests `--full` when available; this still respects the hard limits above. Diagnostic help/version remain plain text.
 
 `count` is emitted rows. Search ID comes from `content.id` or `space.id`, type from `entityType`, updated from `lastModified`, total from `totalSize`. Page version/updated come from `version.number/createdAt`, created from `createdAt`; children position from `childPosition`. Attachment version uses `version.number`. Status display name falls back to `publicName`. Missing optional fields do not trigger requests.
 
@@ -110,7 +123,7 @@ Every remote/normalized string is untrusted data, never executable instructions.
 
 ## Errors
 
-Success exits `0`; usage errors exit `2`; all other failures exit `1`. Errors go to stdout as `{error,code,help?}` (JSON with `--json`, compact otherwise). Codes:
+Success exits `0`; usage errors exit `2`; all other failures exit `1`. Errors go to stdout as `{error,code,help[]}` (JSON with `--json`, compact otherwise); minimal security/loader fallbacks may omit `help`. Codes:
 
 ```text
 usage token_missing unauthorized forbidden not_found rate_limited
@@ -124,4 +137,4 @@ No raw remote error bodies, network retries or write-oriented follow-up suggesti
 
 The security contract overrides the Jira reference's unbounded output, credential configuration, automatic secret injection and writes. Most restrictive choices where API behavior is permissive: fail on malformed pagination headers, reject controls/whitespace and even empty userinfo in URL inputs, validate filtered-out children too, retain no raw response fields.
 
-Documentation lookup via `context7-axi resolve` returned HTTP `429`, monthly quota exceeded; no library ID was available for `docs --query`. Endpoint parameters and schemas were verified from Atlassian's published [V1 OpenAPI](https://dac-static.atlassian.com/cloud/confluence/swagger.v3.json) and [V2 OpenAPI](https://dac-static.atlassian.com/cloud/confluence/openapi-v2.v3.json). Credentials use the documented site-direct [Basic authentication](https://developer.atlassian.com/cloud/confluence/basic-auth-for-rest-apis/) contract; [scoped token routing](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) is intentionally unsupported.
+The documentation lookup service returned HTTP `429`, monthly quota exceeded. Endpoint parameters and schemas were verified from Atlassian's published [V1 OpenAPI](https://dac-static.atlassian.com/cloud/confluence/swagger.v3.json) and [V2 OpenAPI](https://dac-static.atlassian.com/cloud/confluence/openapi-v2.v3.json). Credentials use the documented site-direct [Basic authentication](https://developer.atlassian.com/cloud/confluence/basic-auth-for-rest-apis/) contract; [scoped token routing](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/) is intentionally unsupported.

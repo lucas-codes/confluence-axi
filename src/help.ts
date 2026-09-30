@@ -1,4 +1,19 @@
+import type { Args } from './args.ts';
+
 export const VERSION = '0.1.0';
+export function responseHints(value: Record<string,unknown>, args: Args): Record<string,unknown> {
+  function shortened(v: unknown): boolean {
+    if(!v || typeof v!=='object') return false;
+    const o=v as Record<string,unknown>;
+    return o.bodyTruncated===true || !!o.truncatedFields || Object.values(o).some(shortened);
+  }
+  const {command}=args;
+  const template=command==='search' ? 'search -q <CQL>' : ['page','children','attachments','labels'].includes(command) ? `${command} <ID>` : command;
+  const help=command==='status' ? ['confluence-axi spaces','confluence-axi search -q <CQL>'] : command==='page' ? ['confluence-axi children <ID>','confluence-axi labels <ID>'] : ['confluence-axi page <ID>'];
+  if(value.hasMore===true) help.push(`confluence-axi ${template} --cursor <nextCursor>`);
+  if(command!=='status' && !args.full && shortened(value)) help.push(`confluence-axi ${template} --full`);
+  return {...value,...(value.count===0 ? {message:'0 results on this source page'} : {}),help};
+}
 export function helpText(): string {
   return `usage: confluence-axi [command] [args] [flags]
 commands[8]:

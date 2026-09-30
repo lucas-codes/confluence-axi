@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import { decode } from '@toon-format/toon';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { main } from '../index.ts';
 import { request, ORIGIN } from '../api.ts';
@@ -33,6 +35,55 @@ test('every read command uses one authenticated GET and normalized schema', asyn
     assert.ok(!r.output.includes('downloadLink')); assert.ok(!r.output.includes('evil.test'));
     if(field==='body') assert.equal(new URL(r.calls[0]!.url).searchParams.get('body-format'),'atlas_doc_format');
     if(field==='children') assert.equal(r.value.count,1);
+  }
+});
+
+test('strict TOON decoding matches normalized JSON for every data command and errors', async () => {
+  const cases: [string[],unknown][] = [
+    [[],{type:'known',accountId:'007',displayName:''}],
+    [['status'],{type:'known',accountId:'abc',displayName:'null'}],
+    [['search','-q','type=page'],{results:[{content:{id:'123'},title:'true',excerpt:'a,b: c',entityType:'content'}],totalSize:1}],
+    [['spaces'],{results:[{id:'1',name:'-'}]}],
+    [['page','123'],{...page,body:{atlas_doc_format:{value:doc([{type:'text',text:'first\n  next\t"quoted" \\ path'}])}}}],
+    [['children','123'],{results:[{id:'2',type:'page',title:'x'.repeat(91)}]}],
+    [['attachments','123'],{results:[{id:'a',fileSize:0}]}],
+    [['labels','123'],{results:[{id:'1',name:'tag'},{id:'2',name:''}]}],
+    ...['search','spaces','children','attachments','labels'].map(command => [command==='search' ? [command,'-q','none'] : command==='spaces' ? [command] : [command,'123'],{results:[]}] as [string[],unknown]),
+    [['page','123','--max-chars','3'],{...page,title:'x'.repeat(91)}],
+    [['unknown'],{}],
+  ];
+  for(const [args,data] of cases) {
+    const compact=await run(args,data), json=await run([...args,'--json'],data);
+    assert.equal(compact.exit,json.exit);
+    assert.deepEqual(decode(compact.output,{strict:true}),json.value,JSON.stringify(args));
+  }
+});
+
+test('responses disclose empty states and bounded read-only next steps', async () => {
+  const home=await run(['--json'],{type:'known',accountId:'a'});
+  assert.deepEqual(home.value.help,['confluence-axi spaces','confluence-axi search -q <CQL>']);
+  for(const command of ['search','spaces','children','attachments','labels']) {
+    const args=command==='search' ? [command,'-q','none'] : command==='spaces' ? [command] : [command,'123'];
+    const empty=await run([...args,'--json'],{results:[]});
+    assert.equal(empty.value.message,'0 results on this source page');
+    assert.equal(empty.value.count,0); assert.equal(empty.value.hasMore,false);
+    assert.ok(empty.value.help.every((s: unknown)=>typeof s==='string'));
+  }
+  const short=await run(['page','123','--max-chars','3','--json'],page);
+  assert.ok(short.value.help.includes('confluence-axi page <ID> --full'));
+  const longHome=await run(['status','--json'],{type:'known',accountId:'a',displayName:'x'.repeat(91)});
+  assert.ok(!longHome.value.help.some((s: string)=>s.includes('--full')));
+  const failure=await run(['unknown','--json']);
+  assert.deepEqual(failure.value.help,['confluence-axi --help']);
+});
+
+test('locked official-encoder response fixtures', async () => {
+  const fixtures=JSON.parse(readFileSync(new URL('./fixtures/responses.json',import.meta.url),'utf8')) as {args:string[];data:unknown;output:string}[];
+  for(const fixture of fixtures) {
+    const compact=await run(fixture.args,fixture.data);
+    assert.equal(compact.output,fixture.output,JSON.stringify(fixture.args));
+    const json=await run([...fixture.args,'--json'],fixture.data);
+    assert.deepEqual(decode(compact.output,{strict:true}),json.value);
   }
 });
 
