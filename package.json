@@ -15,10 +15,10 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=22.18.0"
+    "node": "v26.13.1"
   },
   "volta": {
-    "node": "24.21.0"
+    "node": "24.22.3"
   },
   "scripts": {
     "build": "bun build src/index.ts --target=node --outdir=dist && chmod +x bin/confluence-axi",
@@ -27,10 +27,10 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "typescript": "^5.7.0"
+    "@types/node": "24.19.0",
+    "typescript": "5.9.3"
   },
   "dependencies": {
-    "@toon-format/toon": "4.1.1"
+    "@toon-format/toon": "4.4.0"
   }
 }
